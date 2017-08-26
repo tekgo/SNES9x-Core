@@ -31,5 +31,5 @@
 @class OERingBuffer;
 
 OE_EXPORTED_CLASS
-@interface SNESGameCore : OEGameCore
+@interface SNESGameCore : OEGameCore <OEScriptableGameCore>
 @end

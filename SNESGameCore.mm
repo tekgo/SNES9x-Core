@@ -42,6 +42,9 @@
 #include "cheats.h"
 #import "OESNESSystemResponderClient.h"
 
+uint8 S9xGetByteFree (uint32);
+void S9xSetByteFree (uint8, uint32);
+
 #define SAMPLERATE      32040
 #define SIZESOUNDBUFFER SAMPLERATE / 50 * 4
 
@@ -868,6 +871,32 @@ static void FinalizeSamplesAudioCallback(void *context)
     
     Settings.ApplyCheats = true;
     S9xApplyCheats();
+}
+
+#pragma mark - Scriptable
+
+- (void) setData: (NSData *)data atAddress: (UInt32)address {
+    NSUInteger length = [data length];
+    if (length < 1) {
+        return;
+    }
+    
+    UInt8 bytes[length];
+    [data getBytes:bytes length:length];
+    
+    for (int i=0; i<length; i++) {
+        S9xSetByteFree(bytes[i], address + i);
+    }
+}
+
+- (NSData *) getBytesAtAddress: (UInt32)address length: (UInt) length {
+    UInt8 bytes[length];
+    
+    for (int i=0; i<length; i++) {
+        bytes[i] = S9xGetByteFree(address + i);
+    }
+    
+    return [NSData dataWithBytes:bytes length:length];
 }
 
 @end
