@@ -875,6 +875,41 @@ static void FinalizeSamplesAudioCallback(void *context)
 
 #pragma mark - Scriptable
 
+static uint8 CalcBlend8(uint8 dst, uint8 src, uint8 alpha)
+{
+    if (alpha == 0)
+        return dst;
+    else if (alpha == 255)
+        return src;
+    else
+        return (uint8)((((int) src - dst) * alpha / 255 + dst) & 0xFF);
+}
+
+static void WriteColor16(uint8 *dst, uint8 r, uint8 g, uint8 b)
+{
+    *(uint16*)dst = BUILD_PIXEL(r >> 3, g >> 3, b >> 3);
+}
+
+static void ParseColor16(uint8 *src, uint8 *r, uint8 *g, uint8 *b, uint8 *a)
+{
+    uint16 color = *(uint16*)src;
+    uint32 rv, gv, bv;
+    DECOMPOSE_PIXEL(color, rv, gv, bv);
+    *b = bv << 3;
+    *g = gv << 3;
+    *r = rv << 3;
+    if (a != NULL)
+        *a = 255;
+}
+
+static void ParseColor32(uint32 src, uint8 &r, uint8 &g, uint8 &b, uint8 &a)
+{
+    r = (src & 0xFF000000) >> 24;
+    g = (src & 0x00FF0000) >> 16;
+    b = (src & 0x0000FF00) >> 8;
+    a = src & 0x000000FF;
+}
+
 - (void) setData: (NSData *)data atAddress: (UInt32)address {
     NSUInteger length = [data length];
     if (length < 1) {
@@ -897,6 +932,88 @@ static void FinalizeSamplesAudioCallback(void *context)
     }
     
     return [NSData dataWithBytes:bytes length:length];
+}
+
+- (NSColor *) getColorAt: (UInt)x y: (UInt) y {
+    UInt32 r,g,b;
+    UInt32 idx = x + y * GFX.RealPPL;
+    DECOMPOSE_PIXEL(GFX.Screen[idx], r, g, b);
+    
+    return [NSColor colorWithRed:((CGFloat) r) / 255.0 green:((CGFloat) g) / 255.0 blue:((CGFloat) b) / 255.0 alpha:1.0];
+}
+
+- (void) setColor:(UInt32)color atX:(UInt)x y: (UInt) y {
+    UInt32 idx = x + y * GFX.RealPPL;
+    UInt32 r,g,b;
+    UInt8 *buf = (uint8*)&color;
+    r = buf[0];
+    g = buf[1];
+    b = buf[2];
+    GFX.Screen[idx] = BUILD_PIXEL(r >> 3, g >> 3, b >> 3);
+}
+
+- (CGSize) scriptScreenSize {
+    return  CGSizeMake(SNES_WIDTH, SNES_HEIGHT_EXTENDED);
+}
+
+- (void) drawData:(NSData *)data withSize:(CGSize)size {
+    UInt32 * buffer = (UInt32*)data.bytes;
+    
+    int width = (int)size.width;
+    int height = (int)size.height;
+    
+    if (((int)width % SNES_WIDTH != 0) || ((int)height % SNES_HEIGHT != 0 && (int)height % SNES_HEIGHT_EXTENDED != 0)) {
+        return;
+    }
+    int xscale = width / SNES_WIDTH;
+    int yscale = 1;
+    if (height % SNES_HEIGHT_EXTENDED == 0)
+        yscale = height / SNES_HEIGHT_EXTENDED;
+    else
+        yscale = height / SNES_HEIGHT;
+    
+    const int luaScreenWidth = SNES_WIDTH;
+    const int luaScreenHeight = SNES_HEIGHT_EXTENDED;
+    
+    int pitch = GFX.Pitch;
+    uint8 *s = (uint8 *)GFX.Screen;
+    int bpp = 16;
+    
+    for (int y = 0; y < height && y < luaScreenHeight; y++)
+    {
+        for (int x = 0; x < width && x < luaScreenWidth; x++)
+        {
+            uint32 src_px = buffer[y * luaScreenWidth + x];
+            uint8 src_r, src_g, src_b, src_a;
+            ParseColor32(src_px, src_r, src_g, src_b, src_a);
+            if (src_a == 0)
+                continue;
+            
+            for (int yscalei = 0; yscalei < yscale; yscalei++)
+            {
+                for (int xscalei = 0; xscalei < xscale; xscalei++)
+                {
+                    const int x_dst = (x * xscale) + xscalei;
+                    const int y_dst = (y * yscale) + yscalei;
+                    uint8 *dst_px = &s[y_dst * pitch + x_dst * (bpp / 8)];
+                    
+                    if (src_a == 255)
+                    {
+                        // direct copy
+                        WriteColor16(dst_px, src_r, src_g, src_b);
+                    }
+                    else
+                    {
+                        // alpha-blend
+                        uint8 dst_r, dst_g, dst_b;
+                        ParseColor16(dst_px, &dst_r, &dst_g, &dst_b, NULL);
+                        
+                        WriteColor16(dst_px, CalcBlend8(dst_r, src_r, src_a), CalcBlend8(dst_g, src_g, src_a), CalcBlend8(dst_b, src_b, src_a));
+                    }
+                }
+            }
+        }
+    }
 }
 
 @end
